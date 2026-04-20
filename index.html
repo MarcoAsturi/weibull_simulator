@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parametric Statistics: Outlier Impact Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 95vh; }
+        .header { background-color: #1a2a3a; color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header h1 { margin: 0; font-size: 1.4rem; letter-spacing: 0.5px; }
+        .header p { margin: 5px 0 0 0; font-size: 0.85rem; opacity: 0.8; }
+        .container { display: flex; flex: 1; gap: 20px; min-height: 0; }
+        .panel { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        
+        /* Left Column: Data Controls */
+        .controls { flex: 0 0 320px; display: flex; flex-direction: column; overflow-y: auto; }
+        .controls h3 { margin-top: 0; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; font-size: 1.1rem; color: #1a2a3a; }
+        .btn-group { display: flex; gap: 10px; margin-bottom: 15px; }
+        .btn { flex: 1; border: none; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.8rem; transition: background 0.2s; }
+        .btn-primary { background-color: #2c3e50; color: white; }
+        .btn-primary:hover { background-color: #1a2a3a; }
+        .btn-secondary { background-color: #95a5a6; color: white; }
+        .btn-secondary:hover { background-color: #7f8c8d; }
+        
+        .data-list { flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; background: #fafafa; }
+        .data-item { display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        .data-item:last-child { border-bottom: none; }
+        .data-item label { margin-left: 10px; cursor: pointer; flex: 1; color: #444; }
+        .tag { font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: bold; margin-left: 8px; text-transform: uppercase; }
+        .tag-early { background: #ffdada; color: #cc0000; }
+        
+        .status-msg { font-size: 0.85rem; padding: 10px; border-radius: 4px; margin-top: 10px; }
+        .loading { background: #fff3e0; color: #e65100; }
+        .error { background: #ffebee; color: #c62828; }
+
+        /* Right Column: Analytics & Visualization */
+        .visualization { flex: 1; display: flex; flex-direction: column; }
+        .metrics { display: flex; gap: 15px; margin-bottom: 20px; }
+        .metric-card { flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px; border-top: 4px solid #2c3e50; transition: all 0.3s; }
+        .metric-card h4 { margin: 0 0 8px 0; color: #555; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+        .metric-card .value { font-size: 1.6rem; font-weight: 700; color: #1a2a3a; }
+        .metric-card.warning { border-top-color: #e74c3c; background: #fff5f5; }
+        .metric-card.warning h4, .metric-card.warning .value { color: #c0392b; }
+        
+        .chart-container { flex: 1; position: relative; width: 100%; min-height: 300px; padding-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Parametric Model Simulator - Outlier Impact Study</h1>
+        <p>Interactive tool to evaluate how early data points affect the probability density function. Data loaded from "data.csv".</p>
+    </div>
+
+    <div class="container">
+        <div class="panel controls">
+            <h3>Dataset Records</h3>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="filterEarly(false)">Exclude < 100</button>
+                <button class="btn btn-secondary" onclick="filterEarly(true)">Include All</button>
+            </div>
+            <div class="data-list" id="dataList">
+                <div class="status-msg loading" id="statusMsg">Fetching data.csv...</div>
+            </div>
+        </div>
+
+        <div class="panel visualization">
+            <div class="metrics">
+                <div class="metric-card" id="card-beta">
+                    <h4>Shape Parameter (&beta;)</h4>
+                    <div class="value" id="val-beta">--</div>
+                </div>
+                <div class="metric-card" id="card-eta">
+                    <h4>Scale Parameter (&eta;)</h4>
+                    <div class="value" id="val-eta">--</div>
+                </div>
+                <div class="metric-card" id="card-regime">
+                    <h4>Dominant Regime</h4>
+                    <div class="value" style="font-size: 1.1rem; margin-top: 5px;" id="val-regime">--</div>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Generic Statistical Simulator Logic
+         * Uses Linear Regression on Median Ranks (Bernard's Approximation)
+         */
+
+        let observations = [];
+        let chartInstance = null;
+
+        // 1. Data Ingestion from CSV
+        async function loadData() {
+            try {
+                const response = await fetch('data.csv');
+                if (!response.ok) throw new Error("File 'data.csv' not found in repository root.");
+                const text = await response.text();
+                processCSV(text);
+                renderUI();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('statusMsg').className = "status-msg error";
+                document.getElementById('statusMsg').innerHTML = `<b>Error:</b> Could not load data.csv. <br><small>Ensure the file exists in the same folder.</small>`;
+            }
+        }
+
+        function processCSV(text) {
+            const lines = text.split('\n');
+            observations = [];
+            lines.forEach(line => {
+                let clean = line.replace(',', '.').trim();
+                let val = parseFloat(clean);
+                // Filtering valid positive numbers (excluding headers and NULLs)
+                if (!isNaN(val) && val > 0) {
+                    observations.push(val);
+                }
+            });
+            observations.sort((a, b) => a - b);
+        }
+
+        function renderUI() {
+            const list = document.getElementById('dataList');
+            list.innerHTML = '';
+            
+            if (observations.length < 2) {
+                list.innerHTML = '<div class="status-msg error">Insufficient data points in CSV (min 2).</div>';
+                return;
+            }
+
+            observations.forEach((val, i) => {
+                const isEarly = val < 100;
+                const div = document.createElement('div');
+                div.className = 'data-item';
+                div.innerHTML = `
+                    <input type="checkbox" id="pt-${i}" value="${val}" checked onchange="runAnalysis()">
+                    <label for="pt-${i}">${val.toFixed(2)} ${isEarly ? '<span class="tag tag-early">Early Event</span>' : ''}</label>
+                `;
+                list.appendChild(div);
+            });
+            runAnalysis();
+        }
+
+        // 2. Statistical Analysis Core
+        function filterEarly(show) {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(c => {
+                if (parseFloat(c.value) < 100) c.checked = show;
+                else c.checked = true;
+            });
+            runAnalysis();
+        }
+
+        function solveWeibull(sample) {
+            if (sample.length < 2) return { beta: 1, eta: 0 };
+            
+            let sorted = [...sample].sort((a, b) => a - b);
+            let n = sorted.length;
+            let xSum = 0, ySum = 0, xySum = 0, x2Sum = 0;
+
+            for (let i = 0; i < n; i++) {
+                let t = sorted[i];
+                // Median Rank Approximation
+                let rank = (i + 1 - 0.3) / (n + 0.4);
+                let x = Math.log(t);
+                let y = Math.log(-Math.log(1 - rank));
+
+                xSum += x; ySum += y;
+                xySum += x * y; x2Sum += x * x;
+            }
+
+            let beta = (n * xySum - xSum * ySum) / (n * x2Sum - xSum * xSum);
+            let intercept = (ySum - beta * xSum) / n;
+            let eta = Math.exp(-intercept / beta);
+
+            return { beta, eta };
+        }
+
+        function getPDF(x, beta, eta) {
+            if (x <= 0 || eta === 0) return 0;
+            return (beta / eta) * Math.pow(x / eta, beta - 1) * Math.exp(-Math.pow(x / eta, beta));
+        }
+
+        // 3. Update Visuals
+        function runAnalysis() {
+            const selected = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
+                                  .map(c => parseFloat(c.value));
+            
+            if (selected.length < 2) return;
+
+            const { beta, eta } = solveWeibull(selected);
+
+            // Update Metrics
+            document.getElementById('val-beta').innerText = beta.toFixed(3);
+            document.getElementById('val-eta').innerText = Math.round(eta).toLocaleString();
+            
+            const betaCard = document.getElementById('card-beta');
+            const regimeCard = document.getElementById('card-regime');
+            const regimeText = document.getElementById('val-regime');
+
+            if (beta < 1) {
+                betaCard.className = "metric-card warning";
+                regimeCard.className = "metric-card warning";
+                regimeText.innerText = "Infant Mortality \n(High early failure probability)";
+            } else {
+                betaCard.className = "metric-card";
+                regimeCard.className = "metric-card";
+                regimeText.innerText = "Wear-out Phase \n(Steady or increasing risk)";
+            }
+
+            // Generate Chart Data
+            const steps = [];
+            const pdfValues = [];
+            const maxRange = Math.max(4000, eta * 1.5);
+            for (let i = 0; i <= maxRange; i += (maxRange / 100)) {
+                steps.push(Math.round(i));
+                pdfValues.push(getPDF(i, beta, eta));
+            }
+
+            updateChart(steps, pdfValues, beta < 1);
+        }
+
+        function updateChart(labels, data, isWarning) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const themeColor = isWarning ? '#c0392b' : '#2c3e50';
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Probability Density Function (PDF)',
+                        data: data,
+                        borderColor: themeColor,
+                        backgroundColor: isWarning ? 'rgba(192, 57, 43, 0.1)' : 'rgba(44, 62, 80, 0.1)',
+                        borderWidth: 2.5,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { title: { display: true, text: 'Independent Value (Time/Units)', font: { weight: 'bold' } } },
+                        y: { title: { display: true, text: 'Probability Density', font: { weight: 'bold' } }, suggestedMax: 0.001 }
+                    }
+                }
+            });
+        }
+
+        window.onload = loadData;
+    </script>
+</body>
+</html>
