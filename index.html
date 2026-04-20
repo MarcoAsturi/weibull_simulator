@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parametric Statistics: Outlier Impact Simulator</title>
+    <title>Parametric Statistics: Outlier Impact & Forecasting</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 95vh; }
@@ -18,6 +18,7 @@
         .controls h3 { margin-top: 0; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; font-size: 1.1rem; color: #1a2a3a; }
         
         .filter-box { background: #f8f9fa; border: 1px solid #e0e0e0; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
+        .filter-box h4 { margin: 0 0 10px 0; font-size: 0.9rem; color: #2c3e50; text-transform: uppercase; letter-spacing: 0.5px;}
         .filter-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.85rem; font-weight: 600; color: #333; }
         .filter-row input { width: 60px; padding: 4px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
         
@@ -38,31 +39,35 @@
         .status-msg { font-size: 0.85rem; padding: 10px; border-radius: 4px; margin-top: 10px; }
         .loading { background: #fff3e0; color: #e65100; }
         .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e9; color: #2e7d32; }
 
         /* Right Column: Analytics & Visualization */
-        .visualization { flex: 1; display: flex; flex-direction: column; }
-        .metrics { display: flex; gap: 15px; margin-bottom: 20px; }
-        .metric-card { flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px; border-top: 4px solid #2c3e50; transition: all 0.3s; }
+        .visualization { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+        .metrics { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
+        .metric-card { flex: 1; min-width: 140px; background: #f8f9fa; padding: 15px; border-radius: 8px; border-top: 4px solid #2c3e50; transition: all 0.3s; }
         .metric-card h4 { margin: 0 0 8px 0; color: #555; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
         .metric-card .value { font-size: 1.6rem; font-weight: 700; color: #1a2a3a; }
         .metric-card.warning { border-top-color: #e74c3c; background: #fff5f5; }
         .metric-card.warning h4, .metric-card.warning .value { color: #c0392b; }
+        .metric-card.highlight { border-top-color: #27ae60; background: #f4fcf7; }
+        .metric-card.highlight h4, .metric-card.highlight .value { color: #27ae60; }
         
-        .chart-container { flex: 1; position: relative; width: 100%; min-height: 300px; padding-top: 10px; }
+        .chart-container { flex: 1; position: relative; width: 100%; min-height: 350px; padding-top: 10px; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1>Parametric Model Simulator - Outlier Impact Study</h1>
-        <p>Interactive tool to evaluate how data trimming affects the probability density function. Data loaded from "data.csv".</p>
+        <h1>Parametric Simulator & Forecast Engine</h1>
+        <p>Analyze outlier impact and predict future events using conditional probability. Loads `data.csv` (historical events) and `history.csv` (active units).</p>
     </div>
 
     <div class="container">
         <div class="panel controls">
-            <h3>Dataset Records</h3>
+            <h3>Model Configuration</h3>
             
             <div class="filter-box">
+                <h4>Data Trimming</h4>
                 <div class="filter-row">
                     Discard Bottom %: 
                     <input type="number" id="lowerP" value="0" min="0" max="49" step="1">
@@ -77,24 +82,40 @@
                 </div>
             </div>
 
+            <div class="filter-box">
+                <h4>Forecast Settings</h4>
+                <div class="filter-row">
+                    Forecast Window: 
+                    <input type="number" id="forecastWindow" value="30" min="1" step="1" onchange="runAnalysis()">
+                </div>
+                <div id="activeStatus" style="font-size: 0.75rem; color: #666; margin-top: 8px;">
+                    Loading active inventory...
+                </div>
+            </div>
+
             <div class="data-list" id="dataList">
-                <div class="status-msg loading" id="statusMsg">Fetching data.csv...</div>
+                <div class="status-msg loading" id="statusMsg">Fetching data...</div>
             </div>
         </div>
 
         <div class="panel visualization">
             <div class="metrics">
                 <div class="metric-card" id="card-beta">
-                    <h4>Shape Parameter (&beta;)</h4>
+                    <h4>Shape (&beta;)</h4>
                     <div class="value" id="val-beta">--</div>
                 </div>
                 <div class="metric-card" id="card-eta">
-                    <h4>Scale Parameter (&eta;)</h4>
+                    <h4>Scale (&eta;)</h4>
                     <div class="value" id="val-eta">--</div>
                 </div>
                 <div class="metric-card" id="card-regime">
-                    <h4>Dominant Regime</h4>
+                    <h4>Regime</h4>
                     <div class="value" style="font-size: 1.1rem; margin-top: 5px;" id="val-regime">--</div>
+                </div>
+                <div class="metric-card highlight" id="card-predict">
+                    <h4>Expected Events</h4>
+                    <div class="value" id="val-predict">--</div>
+                    <div style="font-size: 0.7rem; color: #27ae60; margin-top: 3px;" id="val-predict-sub">In next 30 units</div>
                 </div>
             </div>
             <div class="chart-container">
@@ -104,47 +125,71 @@
     </div>
 
     <script>
-        let observations = [];
+        let failuresData = [];
+        let activeUnitsData = [];
         let chartInstance = null;
 
-        // 1. Data Ingestion from CSV
+        // 1. Data Ingestion (Handles two files now)
         async function loadData() {
+            let msgBox = document.getElementById('statusMsg');
+            let hasErrors = false;
+
+            // Load Historical Failures (data.csv)
             try {
-                const response = await fetch('data.csv');
-                if (!response.ok) throw new Error("File 'data.csv' not found.");
-                const text = await response.text();
-                processCSV(text);
-                renderUI();
+                const resData = await fetch('data.csv');
+                if (!resData.ok) throw new Error("Missing data.csv");
+                failuresData = processCSV(await resData.text());
             } catch (err) {
                 console.error(err);
-                document.getElementById('statusMsg').className = "status-msg error";
-                document.getElementById('statusMsg').innerHTML = `<b>Error:</b> Could not load data.csv.`;
+                msgBox.className = "status-msg error";
+                msgBox.innerHTML = `<b>Error:</b> Could not load data.csv.`;
+                hasErrors = true;
             }
+
+            // Load Active Inventory (history.csv)
+            let activeStatus = document.getElementById('activeStatus');
+            try {
+                const resHist = await fetch('history.csv');
+                if (resHist.ok) {
+                    activeUnitsData = processCSV(await resHist.text());
+                    activeStatus.innerHTML = `Active items loaded: <b>${activeUnitsData.length}</b>`;
+                    activeStatus.style.color = "#2e7d32";
+                } else {
+                    throw new Error("Missing");
+                }
+            } catch (err) {
+                activeStatus.innerHTML = `<b>Warning:</b> history.csv not found. Forecast disabled.`;
+                activeStatus.style.color = "#c62828";
+            }
+
+            if (!hasErrors) renderUI();
         }
 
+        // CSV Parser: skips text, headers, NULLs, and zeros
         function processCSV(text) {
             const lines = text.split('\n');
-            observations = [];
+            let parsed = [];
             lines.forEach(line => {
                 let clean = line.replace(',', '.').trim();
                 let val = parseFloat(clean);
                 if (!isNaN(val) && val > 0) {
-                    observations.push(val);
+                    parsed.push(val);
                 }
             });
-            observations.sort((a, b) => a - b);
+            return parsed.sort((a, b) => a - b);
         }
 
+        // 2. Build Checkboxes for Historical Data
         function renderUI() {
             const list = document.getElementById('dataList');
             list.innerHTML = '';
             
-            if (observations.length < 2) {
-                list.innerHTML = '<div class="status-msg error">Insufficient data points in CSV (min 2).</div>';
+            if (failuresData.length < 2) {
+                list.innerHTML = '<div class="status-msg error">Insufficient data in data.csv (min 2).</div>';
                 return;
             }
 
-            observations.forEach((val, i) => {
+            failuresData.forEach((val, i) => {
                 const div = document.createElement('div');
                 div.className = 'data-item';
                 div.id = `item-${i}`;
@@ -157,7 +202,7 @@
             runAnalysis();
         }
 
-        // --- NEW: Percentile Logic ---
+        // 3. Percentile Logic
         function getPercentileValue(data, percentile) {
             if (data.length === 0) return 0;
             if (percentile <= 0) return data[0];
@@ -176,23 +221,16 @@
             let lowerP = parseFloat(document.getElementById('lowerP').value) || 0;
             let upperP = parseFloat(document.getElementById('upperP').value) || 0;
 
-            // Safety caps
-            if (lowerP < 0) lowerP = 0;
-            if (upperP < 0) upperP = 0;
-            if (lowerP > 49) lowerP = 49;
-            if (upperP > 49) upperP = 49;
+            if (lowerP < 0) lowerP = 0; if (upperP < 0) upperP = 0;
+            if (lowerP > 49) lowerP = 49; if (upperP > 49) upperP = 49;
 
-            let lowerCutoff = getPercentileValue(observations, lowerP);
-            let upperCutoff = getPercentileValue(observations, 100 - upperP);
+            let lowerCutoff = getPercentileValue(failuresData, lowerP);
+            let upperCutoff = getPercentileValue(failuresData, 100 - upperP);
 
             const checkboxes = document.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(c => {
                 let val = parseFloat(c.value);
-                if (val < lowerCutoff || val > upperCutoff) {
-                    c.checked = false;
-                } else {
-                    c.checked = true;
-                }
+                c.checked = (val >= lowerCutoff && val <= upperCutoff);
             });
             runAnalysis();
         }
@@ -200,12 +238,11 @@
         function resetFilter() {
             document.getElementById('lowerP').value = 0;
             document.getElementById('upperP').value = 0;
-            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(c => c.checked = true);
+            document.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked = true);
             runAnalysis();
         }
-        // -----------------------------
 
+        // 4. Mathematical Engine
         function solveWeibull(sample) {
             if (sample.length < 2) return { beta: 1, eta: 0 };
             
@@ -215,7 +252,7 @@
 
             for (let i = 0; i < n; i++) {
                 let t = sorted[i];
-                let rank = (i + 1 - 0.3) / (n + 0.4);
+                let rank = (i + 1 - 0.3) / (n + 0.4); // Bernard's Median Rank
                 let x = Math.log(t);
                 let y = Math.log(-Math.log(1 - rank));
 
@@ -235,11 +272,37 @@
             return (beta / eta) * Math.pow(x / eta, beta - 1) * Math.exp(-Math.pow(x / eta, beta));
         }
 
+        // Forecast Engine: Conditional Probability of Failure
+        function calculateExpectedFailures(beta, eta, window) {
+            if (activeUnitsData.length === 0 || eta === 0) return "N/A";
+            
+            let expected = 0;
+            
+            activeUnitsData.forEach(t => {
+                // Reliability at current age
+                let R_current = Math.exp(-Math.pow(t / eta, beta));
+                
+                // If it's technically already "dead" statistically, avoid division by zero
+                if (R_current > 1e-10) {
+                    // Reliability at future age
+                    let R_future = Math.exp(-Math.pow((t + window) / eta, beta));
+                    // Conditional probability of failing in this window
+                    let p_fail = 1 - (R_future / R_current);
+                    expected += p_fail;
+                } else {
+                    // It has outlived its statistical life, failure is imminent
+                    expected += 1;
+                }
+            });
+            
+            return expected.toFixed(2);
+        }
+
+        // 5. App State Update
         function runAnalysis() {
             const checkboxes = document.querySelectorAll('input[type="checkbox"]');
             const selected = [];
             
-            // Handle UI updates for checked/unchecked items
             checkboxes.forEach((c, i) => {
                 const itemDiv = document.getElementById(`item-${i}`);
                 const tag = document.getElementById(`tag-${i}`);
@@ -255,10 +318,15 @@
             
             if (selected.length < 2) return;
 
+            // Calculate Model
             const { beta, eta } = solveWeibull(selected);
+            let forecastWindow = parseFloat(document.getElementById('forecastWindow').value) || 30;
 
+            // Update Metrics UI
             document.getElementById('val-beta').innerText = beta.toFixed(3);
             document.getElementById('val-eta').innerText = Math.round(eta).toLocaleString();
+            document.getElementById('val-predict-sub').innerText = `In next ${forecastWindow} units`;
+            document.getElementById('val-predict').innerText = calculateExpectedFailures(beta, eta, forecastWindow);
             
             const betaCard = document.getElementById('card-beta');
             const regimeCard = document.getElementById('card-regime');
@@ -267,13 +335,14 @@
             if (beta < 1) {
                 betaCard.className = "metric-card warning";
                 regimeCard.className = "metric-card warning";
-                regimeText.innerText = "Infant Mortality \n(High early failure probability)";
+                regimeText.innerText = "Infant Mortality";
             } else {
                 betaCard.className = "metric-card";
                 regimeCard.className = "metric-card";
-                regimeText.innerText = "Wear-out Phase \n(Steady or increasing risk)";
+                regimeText.innerText = "Wear-out Phase";
             }
 
+            // Draw Chart
             const steps = [];
             const pdfValues = [];
             const maxRange = Math.max(4000, eta * 1.5);
@@ -285,6 +354,7 @@
             updateChart(steps, pdfValues, beta < 1);
         }
 
+        // 6. Chart.js Rendering
         function updateChart(labels, data, isWarning) {
             const ctx = document.getElementById('mainChart').getContext('2d');
             if (chartInstance) chartInstance.destroy();
@@ -296,7 +366,7 @@
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Probability Density Function (PDF)',
+                        label: 'Probability Density Function',
                         data: data,
                         borderColor: themeColor,
                         backgroundColor: isWarning ? 'rgba(192, 57, 43, 0.1)' : 'rgba(44, 62, 80, 0.1)',
@@ -311,8 +381,8 @@
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { title: { display: true, text: 'Independent Value (Time/Units)', font: { weight: 'bold' } } },
-                        y: { title: { display: true, text: 'Probability Density', font: { weight: 'bold' } }, suggestedMax: 0.001 }
+                        x: { title: { display: true, text: 'Independent Value (Age)', font: { weight: 'bold' } } },
+                        y: { title: { display: true, text: 'Density', font: { weight: 'bold' } }, suggestedMax: 0.001 }
                     }
                 }
             });
