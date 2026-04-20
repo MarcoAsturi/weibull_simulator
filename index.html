@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parametric Statistics: Outlier Impact & Forecasting</title>
+    <title>Parametric Statistics: Outlier Impact & Immediate Removals</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 95vh; }
@@ -58,8 +58,8 @@
 <body>
 
     <div class="header">
-        <h1>Parametric Simulator & Forecast Engine</h1>
-        <p>Analyze outlier impact and predict future events using conditional probability. Loads `data.csv` (historical events) and `history.csv` (active units).</p>
+        <h1>Parametric Simulator - Deterministic Validation</h1>
+        <p>Analyze outlier impact. Counts active units from `history.csv` that have strictly exceeded the calculated Scale (&eta;).</p>
     </div>
 
     <div class="container">
@@ -83,18 +83,14 @@
             </div>
 
             <div class="filter-box">
-                <h4>Forecast Settings</h4>
-                <div class="filter-row">
-                    Forecast Window: 
-                    <input type="number" id="forecastWindow" value="30" min="1" step="1" onchange="runAnalysis()">
-                </div>
-                <div id="activeStatus" style="font-size: 0.75rem; color: #666; margin-top: 8px;">
-                    Loading active inventory...
+                <h4>Active Inventory</h4>
+                <div id="activeStatus" style="font-size: 0.8rem; color: #666;">
+                    Loading active units from history.csv...
                 </div>
             </div>
 
             <div class="data-list" id="dataList">
-                <div class="status-msg loading" id="statusMsg">Fetching data...</div>
+                <div class="status-msg loading" id="statusMsg">Fetching data.csv...</div>
             </div>
         </div>
 
@@ -113,9 +109,9 @@
                     <div class="value" style="font-size: 1.1rem; margin-top: 5px;" id="val-regime">--</div>
                 </div>
                 <div class="metric-card highlight" id="card-predict">
-                    <h4>Expected Events</h4>
+                    <h4>Immediate Removals</h4>
                     <div class="value" id="val-predict">--</div>
-                    <div style="font-size: 0.7rem; color: #27ae60; margin-top: 3px;" id="val-predict-sub">In next 30 units</div>
+                    <div style="font-size: 0.75rem; color: #27ae60; margin-top: 3px;" id="val-predict-sub">Units with Age &ge; Scale</div>
                 </div>
             </div>
             <div class="chart-container">
@@ -129,7 +125,7 @@
         let activeUnitsData = [];
         let chartInstance = null;
 
-        // 1. Data Ingestion (Handles two files now)
+        // 1. Data Ingestion
         async function loadData() {
             let msgBox = document.getElementById('statusMsg');
             let hasErrors = false;
@@ -158,14 +154,14 @@
                     throw new Error("Missing");
                 }
             } catch (err) {
-                activeStatus.innerHTML = `<b>Warning:</b> history.csv not found. Forecast disabled.`;
+                activeStatus.innerHTML = `<b>Warning:</b> history.csv not found. Prediction disabled.`;
                 activeStatus.style.color = "#c62828";
             }
 
             if (!hasErrors) renderUI();
         }
 
-        // CSV Parser: skips text, headers, NULLs, and zeros
+        // CSV Parser
         function processCSV(text) {
             const lines = text.split('\n');
             let parsed = [];
@@ -179,7 +175,7 @@
             return parsed.sort((a, b) => a - b);
         }
 
-        // 2. Build Checkboxes for Historical Data
+        // 2. Build Checkboxes
         function renderUI() {
             const list = document.getElementById('dataList');
             list.innerHTML = '';
@@ -252,7 +248,7 @@
 
             for (let i = 0; i < n; i++) {
                 let t = sorted[i];
-                let rank = (i + 1 - 0.3) / (n + 0.4); // Bernard's Median Rank
+                let rank = (i + 1 - 0.3) / (n + 0.4); 
                 let x = Math.log(t);
                 let y = Math.log(-Math.log(1 - rank));
 
@@ -272,30 +268,18 @@
             return (beta / eta) * Math.pow(x / eta, beta - 1) * Math.exp(-Math.pow(x / eta, beta));
         }
 
-        // Forecast Engine: Conditional Probability of Failure
-        function calculateExpectedFailures(beta, eta, window) {
+        // Deterministic Counter: How many units have Age >= Scale
+        function countOverdueUnits(eta) {
             if (activeUnitsData.length === 0 || eta === 0) return "N/A";
             
-            let expected = 0;
-            
+            let overdueCount = 0;
             activeUnitsData.forEach(t => {
-                // Reliability at current age
-                let R_current = Math.exp(-Math.pow(t / eta, beta));
-                
-                // If it's technically already "dead" statistically, avoid division by zero
-                if (R_current > 1e-10) {
-                    // Reliability at future age
-                    let R_future = Math.exp(-Math.pow((t + window) / eta, beta));
-                    // Conditional probability of failing in this window
-                    let p_fail = 1 - (R_future / R_current);
-                    expected += p_fail;
-                } else {
-                    // It has outlived its statistical life, failure is imminent
-                    expected += 1;
+                if (t >= eta) {
+                    overdueCount++;
                 }
             });
             
-            return expected.toFixed(2);
+            return overdueCount;
         }
 
         // 5. App State Update
@@ -320,13 +304,13 @@
 
             // Calculate Model
             const { beta, eta } = solveWeibull(selected);
-            let forecastWindow = parseFloat(document.getElementById('forecastWindow').value) || 30;
 
             // Update Metrics UI
             document.getElementById('val-beta').innerText = beta.toFixed(3);
             document.getElementById('val-eta').innerText = Math.round(eta).toLocaleString();
-            document.getElementById('val-predict-sub').innerText = `In next ${forecastWindow} units`;
-            document.getElementById('val-predict').innerText = calculateExpectedFailures(beta, eta, forecastWindow);
+            
+            // Output the simple deterministic count
+            document.getElementById('val-predict').innerText = countOverdueUnits(eta);
             
             const betaCard = document.getElementById('card-beta');
             const regimeCard = document.getElementById('card-regime');
